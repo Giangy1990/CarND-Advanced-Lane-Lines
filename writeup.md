@@ -1,6 +1,6 @@
-## Writeup Of Advanced Lane Lines
+# Writeup Of Advanced Lane Lines
 ---
-**Advanced Lane Finding Project**
+## Advanced Lane Finding Project
 
 The goals / steps of this project are the following:
 
@@ -15,109 +15,227 @@ The goals / steps of this project are the following:
 
 [//]: # (Image References)
 
-[image1]: ./examples/undistort_output.png "Undistorted"
-[image2]: ./test_images/test1.jpg "Road Transformed"
-[image3]: ./examples/binary_combo_example.jpg "Binary Example"
-[image4]: ./examples/warped_straight_lines.jpg "Warp Example"
-[image5]: ./examples/color_fit_lines.jpg "Fit Visual"
-[image6]: ./examples/example_output.jpg "Output"
-[video1]: ./project_video.mp4 "Video"
+[image1]: ./output_images/calibration.png "Calibration Steps"
+[image2]: ./output_images/undistorted.png "Road Transformed"
+[image3]: ./output_images/binary_grad_color.png "Binary Example"
+[image4]: ./output_images/persp_transf_boxes.png "Warp Example"
+[image5]: ./output_images/perspective.png "Fit Visual"
+[image6]: ./output_images/main_image.png "Output"
+[video1]: ./output_videos/project_video.mp4 "Video"  
 
-## [Rubric](https://review.udacity.com/#!/rubrics/571/view) Points
-
-### Here I will consider the rubric points individually and describe how I addressed each point in my implementation.  
+## Code organization
+The code that performs the Advanced Lane Line Finder can be found in the [IPython](./P2.ipynb) notebook. all the code can be grouped into five parts:
+1. Required Libraries;
+2. Algorithm Parameters;
+3. Support Functions;
+4. Camera Calibration;
+5. Pipeline Functions;
+6. Executing Section.
 
 ---
 
-### Writeup / README
+### 1. Required Libraries
+This section (**cell 1**) contains all the libraries required to run the pipeline.
+In particular:
+```python
+import numpy as np
+import cv2
+import glob
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+import os
+from shapely.geometry.polygon import Polygon
+from moviepy.editor import VideoFileClip
+from IPython.display import HTML
+```
+### 2. Algorithm Parameters
+This section (**cell 2**) contains all the parameters used by the algorithms that compose the pipeline and the string used to refers to the input/output folders.
 
-#### 1. Provide a Writeup / README that includes all the rubric points and how you addressed each one.  You can submit your writeup as markdown or pdf.  [Here](https://github.com/udacity/CarND-Advanced-Lane-Lines/blob/master/writeup_template.md) is a template writeup for this project you can use as a guide and a starting point.  
+|   Parameter            | Value      |
+| :--------------------: | :---------:|
+| nx                     | 9          |
+| ny                     | 6          |
+| ksize                  | 15         |
+| mod_thresh             | (20, 100)  |
+| dir_thresh             | (0.7, 1.3) |
+| s_thresh               | (170, 255) |
+| lateral_pixel_offset   | 150        |
+| upper_pixel_offset     | 400        |
+| upper_pixel_length     | 150        |
+| MAX_LONG_LENGTH        | 30         |
+| MAX_LAT_LENGTH         | 3.7        |
+| PERP_TRANS_LONG_PIXELS | 720        |
+| PERP_TRANS_LAT_PIXELS  | 960        |
+| poly_degree            | 2          |
+| nwindows               | 9          |
+| margin                 | 100        |
+| minpix                 | 50         |
 
-You're reading it!
+### 3. Support Functions
+This section (**cell 3**) contains all the plotting function used to debug the code.
+In particular, there is a specific plot function for each pipeline step.
 
-### Camera Calibration
+### 4. Camera Calibration
+This section (**cell 4**) contains the function `compute_calibration_coefficients(path, img_prefix)` that computes the camera calibration and distortion coefficients.
+This function process all the images with prefix equal to `img_prefix` and extension `.jpg` in the `path` folder. The work-flow steps are:
+1. convert to gray scale using `cv2.cvtColor()`
+2. look for chessboard corners using `cv2.findChessboardCorners()`
+3. if the previous step successfully find the corners in the image, then add them to the `imgpoints` data structure
 
-#### 1. Briefly state how you computed the camera matrix and distortion coefficients. Provide an example of a distortion corrected calibration image.
-
-The code for this step is contained in the first code cell of the IPython notebook located in "./examples/example.ipynb" (or in lines # through # of the file called `some_file.py`).  
-
-I start by preparing "object points", which will be the (x, y, z) coordinates of the chessboard corners in the world. Here I am assuming the chessboard is fixed on the (x, y) plane at z=0, such that the object points are the same for each calibration image.  Thus, `objp` is just a replicated array of coordinates, and `objpoints` will be appended with a copy of it every time I successfully detect all chessboard corners in a test image.  `imgpoints` will be appended with the (x, y) pixel position of each of the corners in the image plane with each successful chessboard detection.  
-
-I then used the output `objpoints` and `imgpoints` to compute the camera calibration and distortion coefficients using the `cv2.calibrateCamera()` function.  I applied this distortion correction to the test image using the `cv2.undistort()` function and obtained this result:
+Once all images have been precessed, the camera calibration and distortion coefficients are computed using `cv2.calibrateCamera()`
 
 ![alt text][image1]
 
-### Pipeline (single images)
+### 5. Pipeline Functions
+This section contains all the functions needed to compose the pipeline for the Advanced Lane Line Finder.
+#### Correcting camera distortion
+This function (**cell 6**) corrects the lens distortion using the calibration and distortion coefficients computed by `compute_calibration_coefficients()`.
+To demonstrate this step, in the image below it is presented a test image and its undistorted version.
 
-#### 1. Provide an example of a distortion-corrected image.
-
-To demonstrate this step, I will describe how I apply the distortion correction to one of the test images like this one:
 ![alt text][image2]
 
-#### 2. Describe how (and identify where in your code) you used color transforms, gradients or other methods to create a thresholded binary image.  Provide an example of a binary image result.
+#### Gradient Computations
+This section (**cell 8**) is composed by different functions in order to take into account different threshold policies. The main function to compute the gradient components are:
+* `abs_sobel_thresh()`: it applies Sobel operator over x or over y basing on input parameter and then applies a two fold bounded threshold on it;
+* `mag_thresh()`: it computes x and y gradients and computes the overall gradient magnitude. Then, it applies a two fold bounded threshold on it;
+* `dir_threshold()`: it computes x and y gradients and computes the overall gradient direction. Then, it applies a two fold bounded threshold on it;
 
-I used a combination of color and gradient thresholds to generate a binary image (thresholding steps at lines # through # in `another_file.py`).  Here's an example of my output for this step.  (note: this is not actually from one of the test images)
+Io order to combine the different gradient transformations, the following function has been implemented:
+* `combine_gradients()`: it uses the previous functions to compute a final image combining all the different gradients functions. In particular it returns **(** ***sobel_x*** **&** ***sobel_y*** **) | (** ***magnitude*** **&** ***direction*** **)**.
+
+#### Color Space Computation
+This sections (**cell 9**) contains two functions:
+* `color_transformation()`: it computes the HLS transformation and extrapolates the S layer to perform a two fold bounded threshold on it;
+* `combine_gradinet_with_color()`: it combines the result of the prevoius funtion with the final gradient transformation. In particular it returns **(** ***gradients*** **|** ***color*** **)**.
+
+To demonstrate this step, in the image below it is presented the results of the gradient transformation, the color transformation and the combination of the two transformations.
 
 ![alt text][image3]
 
-#### 3. Describe how (and identify where in your code) you performed a perspective transform and provide an example of a transformed image.
-
-The code for my perspective transform includes a function called `warper()`, which appears in lines 1 through 8 in the file `example.py` (output_images/examples/example.py) (or, for example, in the 3rd code cell of the IPython notebook).  The `warper()` function takes as inputs an image (`img`), as well as source (`src`) and destination (`dst`) points.  I chose the hardcode the source and destination points in the following manner:
-
+#### Perspective Transformation
+This section (**cell 7**) contains the function `perspective_transform()` that computes the perspective transformation to obtain a birds-eye view of the road.
+To perform this transformation are required two set of points:
+* four *source* points on the original image that defines a polygon that contains the two lanes;
+* four *destination* points on the final image that defines the final polygon in which the original one will be mapped.
+The code that performs the points computation is the following one:
 ```python
-src = np.float32(
-    [[(img_size[0] / 2) - 55, img_size[1] / 2 + 100],
-    [((img_size[0] / 6) - 10), img_size[1]],
-    [(img_size[0] * 5 / 6) + 60, img_size[1]],
-    [(img_size[0] / 2 + 55), img_size[1] / 2 + 100]])
-dst = np.float32(
-    [[(img_size[0] / 4), 0],
-    [(img_size[0] / 4), img_size[1]],
-    [(img_size[0] * 3 / 4), img_size[1]],
-    [(img_size[0] * 3 / 4), 0]])
+src_raw = [[(img_size[0]+upper_pixel_length)*.5, upper_pixel_offset],
+           [img_size[0]-lateral_pixel_offset, img_size[1]],
+           [lateral_pixel_offset, img_size[1]],
+           [(img_size[0]-upper_pixel_length)*.5, upper_pixel_offset]]    
+dst_raw = [[img_size[0]-lateral_pixel_offset, 0],
+           [img_size[0]-lateral_pixel_offset, img_size[1]],
+           [lateral_pixel_offset, img_size[1]],
+           [lateral_pixel_offset, 0]]
 ```
 
 This resulted in the following source and destination points:
 
 | Source        | Destination   |
 |:-------------:|:-------------:|
-| 585, 460      | 320, 0        |
-| 203, 720      | 320, 720      |
-| 1127, 720     | 960, 720      |
-| 695, 460      | 960, 0        |
+| 676, 400      | 1052, 0       |
+| 1052, 621     | 1052, 621     |
+| 150, 621      | 150, 621      |
+| 526, 400      | 150, 0        |
 
-I verified that my perspective transform was working as expected by drawing the `src` and `dst` points onto a test image and its warped counterpart to verify that the lines appear parallel in the warped image.
+
+I verified that my perspective transform was working as expected by drawing the `src_raw` and `dst_raw` points onto a test image and its warped counterpart.
 
 ![alt text][image4]
 
-#### 4. Describe how (and identify where in your code) you identified lane-line pixels and fit their positions with a polynomial?
+#### Find Lane Points
+This section (**cell 10**) contains the
 
-Then I did some other stuff and fit my lane lines with a 2nd order polynomial kinda like this:
+* `find_lane_pixels()`: it extract the whole histogram of the image and then it uses the most excited sections of it to start the extraction of the lane pixel coordinates using a sliding window algorithm;
+* `fit_poly()`: it uses the results of the previous function to fit a polynomial over the pixel coordiantes and compute the (x,y) coordinates of the lane lines;
+* `search_around_poly()`: it extracts the lane lines coordinates from an input image using the information of the previous fitting instead of the histogram of the most excited section. It is useful to optimize the lane finding over a video stream;
+* `step_find_lane_lines()`: it combines `find_lane_pixels()` with `fit_poly()` to extract the lane lines coordinates from an image;
+
+To demonstrate the results of this section on a single frame, in the image below it is presented a perspective image (input of this section), its histogram and the obtained lane coordinates plotted over the input image.
 
 ![alt text][image5]
 
-#### 5. Describe how (and identify where in your code) you calculated the radius of curvature of the lane and the position of the vehicle with respect to center.
+#### Compute Curvature
+This section (**cell 11**) contains the function `measure_curvature_meters()` that is used to compute the lanes curvature starting from the lane coordinates. This function performs also the transformation from pixel reference frame to cartesian reference frame using information on the standard lane length and road width.
+It returns the mean between the two lanes curvature.
 
-I did this in lines # through # in my code in `my_other_file.py`
+#### Determine Ego Position
+This section (**cell 12**) contains the function `determine_ego_position()` that is used to compute the position of the vehicle with respect to the midpoint between the two lanes. This function performs also the transformation from pixel reference frame to cartesian reference frame using information on the standard lane length and road width.
 
-#### 6. Provide an example image of your result plotted back down onto the road such that the lane area is identified clearly.
+### 6. Executing section
+This section contains the two pipelines used to process the single frame or the video stream and the respective code to use them.
 
-I implemented this step in lines # through # in my code in `yet_another_file.py` in the function `map_lane()`.  Here is an example of my result on a test image:
+#### Pipeline Single
+The **cell 13** contains the function `advenced_lane_finding_pipeline()` that represents the pipeline used to process a single frame. The main instructions that compose the pipeline are:
+```python
+# remove distortion from image
+undist_img = undistorted_image(img, mtx, dist)
+
+# compute combined gradient binary
+combined_grad_img = combine_gradients(undist_img, ksize, mod_thresh, dir_thresh)
+
+# compute color binary
+color_img = color_transformation(undist_img, s_thresh)
+
+# combine the two contributions
+binary_img, stack_img = combine_gradinet_with_color(combined_grad_img, color_img)
+
+# perspective transform
+perspec_img, M, Minv, src_raw, dst_raw = perspective_transform(binary_img)
+
+# find lane points
+histogram, lane_point_img, left_fitx, right_fitx, ploty = step_find_lane_lines(perspec_img)
+
+# compute curvature
+curvature = measure_curvature_meters(left_fitx, right_fitx, ploty)
+
+# compute ego position
+ego_pos = determine_ego_position(img, left_fitx, right_fitx)
+
+# compose the final image
+fin_img = draw_result(undist_img, perspec_img, lane_point_img, Minv, left_fitx, right_fitx, ploty, curvature, ego_pos, True)
+```
+
+The **cell 14** contains the code necessary to execute this pipeline over all the images contained on the ***test_images*** folder.
+The result of the described pipeline applied to a single image is showed below:
 
 ![alt text][image6]
 
 ---
 
-### Pipeline (video)
+#### Pipeline Video
+The **cell 15** contains a modified version of the previous pipeline and a function used to call this pipeline on the current video frame.
+In particular, the pipeline is defined in the function `process_current_frame_pip()`.
+To improve performances on the video, the instruction
+```python
+histogram, lane_point_img, left_fitx, right_fitx, ploty = step_find_lane_lines(perspec_img)
+```
+has been substituted with
+```python
+# find lane points
+if first_exec:
+    histogram, lane_point_img, left_fitx, right_fitx, ploty = step_find_lane_lines(perspec_img)
+    first_exec = False
+else:
+    histogram, lane_point_img, left_fitx, right_fitx, ploty = search_around_poly(perspec_img, prev_left_fit, prev_right_fit)
 
-#### 1. Provide a link to your final video output.  Your pipeline should perform reasonably well on the entire project video (wobbly lines are ok but no catastrophic failures that would cause the car to drive off the road!).
+# update prev fit variables
+prev_left_fit = np.polyfit(ploty, left_fitx, poly_degree)
+prev_right_fit = np.polyfit(ploty, right_fitx, poly_degree)
+```
 
-Here's a [link to my video result](./project_video.mp4)
+The **cell 16** contains the code necessary to execute this pipeline over the *project_video.mp4*.\
+Here's a [link to my video result](./output_videos/project_video.mp4)
 
 ---
 
-### Discussion
+## Discussion
+### Known Issues
+* The threshold used for gradient and color transformation needs to be tuned more properly in order to improve performances;
+* The thresholding functions needs to be more robust in handling poorly lighted conditions;
+* The perspective transformation needs to be improved with better projection in order to preserve all geometrical properties of lines.
 
-#### 1. Briefly discuss any problems / issues you faced in your implementation of this project.  Where will your pipeline likely fail?  What could you do to make it more robust?
-
-Here I'll talk about the approach I took, what techniques I used, what worked and why, where the pipeline might fail and how I might improve it if I were going to pursue this project further.  
+### Open Points
+The pipeline needs to take into account robustness more deeply. This could be done via:
+* Increase the polynomial degree in order to better manage the lane line shape;
+* Check between successive frames to identify bad detections and preserve overall performances.
